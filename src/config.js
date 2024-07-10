@@ -4,7 +4,7 @@ const config = {
         apiUrl: 'http://localhost:3001',
     },
     production: {
-        apiUrl: 'http://localhost:3001', // or whatever port you use in production
+        apiUrl: 'https://booking-system-backend-cfpn.onrender.com', // or whatever port you use in production
     },
 };
 
