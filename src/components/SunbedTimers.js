@@ -1,64 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { CountdownCircleTimer } from 'react-countdown-circle-timer';
-import { Box, Typography, Paper } from '@mui/material';
+import { Box, Typography, Paper, IconButton } from '@mui/material';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import api from './authentication/api';
 import config from '../config';
 
-const SunbedTimer = ({ type }) => {
-  const [timerKey, setTimerKey] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [duration, setDuration] = useState(0);
-  const [initialRemainingTime, setInitialRemainingTime] = useState(0);
-  const [waitingClients, setWaitingClients] = useState(0);
-  const [totalWaitTime, setTotalWaitTime] = useState(0);
-
-  useEffect(() => {
-    const fetchTimerData = async () => {
-      try {
-        const response = await api.get(`${config.apiUrl}/sunbed-timer/${type}`);
-        const { currentSession, waitingClients } = response.data;
-        let remainingSeconds = 0;
-        
-        if (currentSession) {
-          const purchaseDate = new Date(currentSession.purchaseDate);
-          const now = new Date();
-          const elapsedSeconds = Math.floor((now - purchaseDate) / 1000);
-          const totalSessionSeconds = (currentSession.minutes + 2) * 60; // Including 2 minutes for dressing/undressing
-          remainingSeconds = Math.max(0, totalSessionSeconds - elapsedSeconds);
-          
-          setDuration(totalSessionSeconds);
-          setInitialRemainingTime(remainingSeconds)
-          setIsPlaying(remainingSeconds > 0);
-          setTimerKey(prev => prev + 1);
-        } else {
-          setIsPlaying(false);
-        }
-  
-        setWaitingClients(waitingClients.length);
-
-        const totTime = (waitingClients.reduce((total, client) => total + (client.minutes*60) + 120, 0)) + remainingSeconds;
-        setTotalWaitTime(totTime);
-      } catch (error) {
-        console.error('Error fetching timer data:', error);
-      }
-    };  
-
-    fetchTimerData();
-    const interval = setInterval(fetchTimerData, 5000); // Update every second
-
-    return () => clearInterval(interval);
-  }, [type]);
+const SunbedTimer = ({ timerData }) => {
+  const { type, isPlaying, duration, initialRemainingTime, waitingClients, totalWaitTime } = timerData;
 
   return (
-    <>
-  { isPlaying > 0 &&
-   <Paper elevation={3} sx={{ p: 2, borderRadius: 2, backgroundColor: 'background.paper', mb: 2 }}>
+    <Paper elevation={3} sx={{ p: 2, borderRadius: 2, backgroundColor: 'background.paper', mb: 2 }}>
       <Typography variant="h6" align="center" gutterBottom>
         {type === 'lie-down' ? 'Lie-down Sunbed' : 'Stand-up Sunbed'}
       </Typography>
       <Box display="flex" justifyContent="center" alignItems="center" mb={2}>
         <CountdownCircleTimer
-          key={timerKey}
+          key={initialRemainingTime}
           isPlaying={isPlaying}
           duration={duration}
           initialRemainingTime={initialRemainingTime}
@@ -79,26 +36,122 @@ const SunbedTimer = ({ type }) => {
       <Typography variant="body2" align="center">
         Total Wait Time: {Math.floor(totalWaitTime / 60)}:{String(totalWaitTime % 60).padStart(2, '0')}
       </Typography>
-    </Paper>}
-    </>
+    </Paper>
   );
 };
 
 const SunbedTimers = () => {
+  const [isExpanded, setIsExpanded] = useState(() => {
+    return localStorage.getItem('sunbedTimersExpanded') !== 'false';
+  });
+  const [timerData, setTimerData] = useState({
+    'lie-down': null,
+    'stand-up': null
+  });
+
+  const toggleExpanded = () => {
+    const newExpandedState = !isExpanded;
+    setIsExpanded(newExpandedState);
+    localStorage.setItem('sunbedTimersExpanded', newExpandedState.toString());
+  };
+
+  useEffect(() => {
+    const fetchTimerData = async () => {
+      try {
+        const [lieDownResponse, standUpResponse] = await Promise.all([
+          api.get(`${config.apiUrl}/sunbed-timer/lie-down`),
+          api.get(`${config.apiUrl}/sunbed-timer/stand-up`)
+        ]);
+
+        const processTimerData = (response, type) => {
+          const { currentSession, waitingClients } = response.data;
+          if (!currentSession) return null;
+
+          const purchaseDate = new Date(currentSession.purchaseDate);
+          const now = new Date();
+          const elapsedSeconds = Math.floor((now - purchaseDate) / 1000);
+          const totalSessionSeconds = (currentSession.minutes + 2) * 60; // Including 2 minutes for dressing/undressing
+          const remainingSeconds = Math.max(0, totalSessionSeconds - elapsedSeconds);
+          
+          const totTime = (waitingClients.reduce((total, client) => total + (client.minutes*60) + 120, 0)) + remainingSeconds;
+
+          return {
+            type,
+            isPlaying: remainingSeconds > 0,
+            duration: totalSessionSeconds,
+            initialRemainingTime: remainingSeconds,
+            waitingClients: waitingClients.length,
+            totalWaitTime: totTime
+          };
+        };
+
+        setTimerData({
+          'lie-down': processTimerData(lieDownResponse, 'lie-down'),
+          'stand-up': processTimerData(standUpResponse, 'stand-up')
+        });
+      } catch (error) {
+        console.error('Error fetching timer data:', error);
+      }
+    };
+
+    fetchTimerData();
+    const interval = setInterval(fetchTimerData, 5000); // Update every 5 seconds
+
+    return () => clearInterval(interval);
+  }, []);
+
+  const hasActiveTimers = timerData['lie-down'] !== null || timerData['stand-up'] !== null;
+
+  if (!hasActiveTimers) {
+    return null; // Hide the component when there are no active timers
+  }
+
   return (
     <Box
       sx={{
         position: 'fixed',
         bottom: 50,
-        left: 16,
+        left: 0,
         zIndex: 1000,
         display: 'flex',
-        flexDirection: 'column',
-        gap: 2,
+        transition: 'transform 0.3s ease-in-out',
+        transform: isExpanded ? 'translateX(0)' : 'translateX(-280px)',
       }}
     >
-      <SunbedTimer type="lie-down" />
-      <SunbedTimer type="stand-up" />
+      <Box
+        sx={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 2,
+          backgroundColor: 'background.paper',
+          borderTopRightRadius: 8,
+          borderBottomRightRadius: 8,
+          boxShadow: 3,
+          p: 2,
+          width: 280,
+        }}
+      >
+        {timerData['lie-down'] && <SunbedTimer timerData={timerData['lie-down']} />}
+        {timerData['stand-up'] && <SunbedTimer timerData={timerData['stand-up']} />}
+      </Box>
+      <IconButton
+        onClick={toggleExpanded}
+        sx={{
+          position: 'absolute',
+          right: -40,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          backgroundColor: 'background.paper',
+          '&:hover': {
+            backgroundColor: 'action.hover',
+          },
+          boxShadow: 2,
+          borderTopLeftRadius: 0,
+          borderBottomLeftRadius: 0,
+        }}
+      >
+        {isExpanded ? <ChevronLeft /> : <ChevronRight />}
+      </IconButton>
     </Box>
   );
 };
